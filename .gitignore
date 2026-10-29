@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+
+# import results and QGIS side files
+*.gpkg
+*.gpkg-wal
+*.gpkg-shm
+*.qgs~
+*.qgz~
+
+# local debugging material
+debug/
+
+# sample AIXM data (large, third-party source data); tests skip when absent
+assets/sample_xml_files/*.xml

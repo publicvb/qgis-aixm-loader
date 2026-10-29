@@ -1,0 +1,16 @@
+[general]
+name=AIXM Loader
+qgisMinimumVersion=3.34
+qgisMaximumVersion=4.99
+supportsQt6=True
+description=Load AIXM 5.1 / 5.1.1 / 5.2 data into QGIS with full geometry and attributes.
+about=Imports AIXM 5.x XML (BasicMessage and other feature collections) into a GeoPackage and adds styled layers to the project. Every feature with geometry is shown with its attributes; airspaces are composed from their geometry components (union / subtraction of contributor airspaces, arcs, circles and border-following via GeoBorder xlinks). Several files can be imported together - or added later to the same GeoPackage, e.g. a missing GeoBorder file - so xlinks resolve across files. Feature classes can be selected per import. Timeslices are reduced to the state valid at a chosen date. Gaps and misaligned airspace boundaries are reported as issues on the map.
+version=0.1.0
+author=Vojtěch Beneš
+email=publicvb@gmail.com
+category=Vector
+tags=aixm,aeronautical,aviation,airspace,gml,eaip
+icon=icon.svg
+experimental=True
+deprecated=False
+hasProcessingProvider=no
