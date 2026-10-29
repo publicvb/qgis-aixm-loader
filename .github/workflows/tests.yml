@@ -1,0 +1,22 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        qgis: ["release-3_34", "latest"]
+    container: qgis/qgis:${{ matrix.qgis }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - name: QGIS version
+        run: python3 -c "from qgis.core import Qgis; print(Qgis.version())"
+      - name: Run tests
+        run: python3 -m unittest discover -s tests -t . -v

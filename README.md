@@ -118,3 +118,17 @@ $env:QT_QPA_PLATFORM = "offscreen"
 
 Install for development by linking `aixm_loader` into the QGIS profile
 (`%APPDATA%\QGIS\QGIS4\profiles\default\python\plugins\aixm_loader`), see `scripts/install_dev.ps1`.
+
+GitHub Actions runs the tests on Linux with QGIS 3.34 and the latest QGIS (without the sample
+data, so those tests are skipped there).
+
+## Release
+
+1. Raise `version` in `aixm_loader/metadata.txt` and add a `changelog` entry; commit and push.
+2. `python scripts/build_zip.py` builds `dist/aixm_loader-<version>.zip` from the committed
+   `aixm_loader/` folder.
+3. Upload it at <https://plugins.qgis.org/plugins/add/> (OSGeo ID login).
+
+## License
+
+GPL-2.0-or-later, see `LICENSE`.
