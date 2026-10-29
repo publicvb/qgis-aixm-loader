@@ -5,6 +5,9 @@ from osgeo import ogr, osr
 
 ogr.UseExceptions()
 
+# tables of the GeoPackage that a re-import must keep: QGIS layer styles (remembered user styles)
+KEEP_TABLES = {"layer_styles"}
+
 _GEOM_TYPES = {
     "point": ogr.wkbPoint,
     "line": ogr.wkbMultiLineString,
@@ -139,7 +142,7 @@ class GpkgWriter:
         """Remove layers of an earlier import that this import did not write."""
         names = [self.ds.GetLayerByIndex(i).GetName() for i in range(self.ds.GetLayerCount())]
         for name in names:
-            if name not in self.created:
+            if name not in self.created and name not in KEEP_TABLES:
                 for i in range(self.ds.GetLayerCount()):
                     if self.ds.GetLayerByIndex(i).GetName() == name:
                         self.ds.DeleteLayer(i)

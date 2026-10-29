@@ -59,6 +59,19 @@ route segment end points, contributor airspaces). Layers of the GeoPackage that 
 the project are removed before the import and re-added afterwards in the same group.
 A GeoPackage not created by AIXM Loader is never modified.
 
+## Remembered styles
+
+When you restyle a layer of an import (symbology, labels, opacity / scale visibility, diagrams),
+the plugin remembers it per layer name (e.g. `Airspace`) in two places:
+
+* the GeoPackage's `layer_styles` table (as default style) – travels with the file and survives
+  re-imports into it;
+* `<QGIS profile>/aixm_loader/styles/<layer>.qml` – applies to every later import.
+
+On import the GeoPackage's style wins, then the profile's, then the built-in styling. Values new
+in a later import (e.g. an airspace type) are added to a remembered categorized style.
+Vector → AIXM Loader → *Reset remembered styles…* forgets both copies.
+
 ## Accepted encodings
 
 Anything schema-valid: any message wrapper (BasicMessage, WFS collections, ...) and namespace

@@ -3,7 +3,8 @@ import hashlib
 import os
 
 from qgis.core import (
-    Qgis, QgsCategorizedSymbolRenderer, QgsFillSymbol, QgsLayerTree, QgsLineSymbol, QgsMarkerSymbol,
+    Qgis, QgsCategorizedSymbolRenderer, QgsFeatureRenderer, QgsFillSymbol, QgsLayerTree, QgsLineSymbol,
+    QgsMarkerSymbol,
     QgsPalLayerSettings, QgsProject, QgsRendererCategory, QgsTextFormat, QgsVectorLayer,
     QgsVectorLayerSimpleLabeling,
 )
@@ -35,14 +36,23 @@ def _airspace_renderer(layer):
     idx = layer.fields().indexOf("type")
     if idx < 0:
         return None
-    cats = []
-    for value in sorted(v for v in layer.uniqueValues(idx) if v not in (None, "")):
-        rgb = AIRSPACE_COLOURS.get(str(value).split("-")[0], _hash_colour(value))
-        sym = QgsFillSymbol.createSimple({
-            "color": rgb + ",30", "outline_color": rgb + ",255", "outline_width": "0.4",
-        })
-        cats.append(QgsRendererCategory(value, sym, str(value)))
+    cats = [QgsRendererCategory(value, _airspace_symbol(value), str(value))
+            for value in sorted(v for v in layer.uniqueValues(idx) if v not in (None, ""))]
     return QgsCategorizedSymbolRenderer("type", cats) if cats else None
+
+
+def _airspace_symbol(value):
+    rgb = AIRSPACE_COLOURS.get(str(value).split("-")[0], _hash_colour(value))
+    return QgsFillSymbol.createSimple({
+        "color": rgb + ",30", "outline_color": rgb + ",255", "outline_width": "0.4",
+    })
+
+
+def category_symbol(layer, value):
+    """Symbol for a value missing from a remembered categorized style (None = clone an existing one)."""
+    if layer.source().endswith("layername=Airspace") and layer.renderer().classAttribute() == "type":
+        return _airspace_symbol(value)
+    return None
 
 
 def _label(layer, field="label"):
@@ -105,6 +115,35 @@ def project_imports():
     return out
 
 
+_KIND = {"Point": "point", "Line": "line", "Polygon": "polygon"}
+
+
+def restyle_project_layers(gpkg_paths):
+    """Give the project's layers from these GeoPackages the plugin's built-in styling again."""
+    from .importer import ISSUE_LAYERS
+    from .styles import layer_source
+
+    targets = {os.path.normcase(os.path.abspath(p)) for p in gpkg_paths}
+    for layer in QgsProject.instance().mapLayers().values():
+        path, table = layer_source(layer)
+        if not table or os.path.normcase(os.path.abspath(path)) not in targets or not layer.isSpatial():
+            continue
+        kind = next((k for g, k in _KIND.items()
+                     if layer.geometryType() == getattr(Qgis.GeometryType, g)), None)
+        if kind is None:
+            continue
+        layer.setLabeling(None)
+        layer.setLabelsEnabled(False)
+        layer.setOpacity(1.0)
+        renderer = QgsFeatureRenderer.defaultRenderer(layer.geometryType())
+        layer.setRenderer(renderer)
+        if table in ISSUE_LAYERS:
+            style_issue_layer(layer, kind)
+        else:
+            style_layer(layer, table, kind)
+        layer.triggerRepaint()
+
+
 def remove_from_project(gpkg_path):
     """Remove all layers read from gpkg_path; returns the name of their group (or None).
 
@@ -150,12 +189,17 @@ def style_issue_layer(layer, kind):
         layer.renderer().setSymbol(QgsLineSymbol.createSimple({"line_color": "230,0,0", "line_width": "1.2"}))
 
 
-def add_to_project(gpkg_path, written, group_name=None, include_tables=True):
+def add_to_project(gpkg_path, written, group_name=None, include_tables=True, styles=None):
     """Add layers [(name, kind, count)] from gpkg_path under a new layer-tree group.
 
     Returns the added layers; issue layers go into an "Issues" sub-group on top.
+    ``styles`` (a StyleMemory) re-applies remembered user styles over the built-in ones.
     """
     from .importer import ISSUE_LAYERS, ISSUES_TABLE
+
+    def remembered(layer):
+        if styles is not None:
+            styles.apply(layer, category_symbol)
 
     project = QgsProject.instance()
     root = project.layerTreeRoot()
@@ -171,6 +215,7 @@ def add_to_project(gpkg_path, written, group_name=None, include_tables=True):
             if not layer.isValid():
                 continue
             style_issue_layer(layer, kind)
+            remembered(layer)
             project.addMapLayer(layer, False)
             issues_group.addLayer(layer)
             added.append(layer)
@@ -185,12 +230,14 @@ def add_to_project(gpkg_path, written, group_name=None, include_tables=True):
             continue
         if kind:
             style_layer(layer, name, kind)
+            remembered(layer)
             project.addMapLayer(layer, False)
             group.addLayer(layer)
         else:
             if tables is None:
                 tables = group.addGroup("Tables (no geometry)")
                 tables.setExpanded(False)
+            remembered(layer)
             project.addMapLayer(layer, False)
             tables.addLayer(layer)
         added.append(layer)

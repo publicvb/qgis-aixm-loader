@@ -3,12 +3,15 @@ import os
 
 from qgis.core import Qgis, QgsApplication
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QPushButton
+from qgis.PyQt.QtWidgets import QMessageBox, QPushButton
 
 from .compat import QAction, qenum
 from .dialog import ImportDialog, default_target
 from .qgis_io.importer import ISSUES_TABLE
-from .qgis_io.project_loader import add_to_project, project_imports, remove_from_project
+from .qgis_io.project_loader import (
+    add_to_project, project_imports, remove_from_project, restyle_project_layers,
+)
+from .qgis_io.styles import StyleMemory
 from .qgis_io.task import AixmImportTask, log
 
 MENU = "&AIXM Loader"
@@ -30,6 +33,8 @@ class AixmLoaderPlugin:
     def __init__(self, iface):
         self.iface = iface
         self.action = None
+        self.reset_action = None
+        self.styles = None
         self.tasks = set()  # keep references: tasks are garbage-collected otherwise
         self._load_after = {}
 
@@ -39,17 +44,42 @@ class AixmLoaderPlugin:
         self.action.triggered.connect(self.show_dialog)
         self.iface.addToolBarIcon(self.action)
         self.iface.addPluginToVectorMenu(MENU, self.action)
+        self.reset_action = QAction("Reset remembered styles…", self.iface.mainWindow())
+        self.reset_action.triggered.connect(self.reset_styles)
+        self.iface.addPluginToVectorMenu(MENU, self.reset_action)
+        # remember how imported layers are styled, also for layers of saved projects
+        self.styles = StyleMemory()
+        self.styles.attach()
 
     def unload(self):
+        if self.styles is not None:
+            self.styles.detach()
+            self.styles = None
         self.iface.removePluginVectorMenu(MENU, self.action)
+        self.iface.removePluginVectorMenu(MENU, self.reset_action)
         self.iface.removeToolBarIcon(self.action)
-        self.action = None
+        self.action = self.reset_action = None
+
+    def reset_styles(self):
+        answer = QMessageBox.question(
+            self.iface.mainWindow(), "AIXM Loader",
+            "Forget all remembered layer styles?\n\nThe saved styles are removed from your QGIS profile "
+            "and from the AIXM GeoPackages in this project; their layers get the plugin's default "
+            "styling again.")
+        if answer != qenum(QMessageBox, "StandardButton", "Yes"):
+            return
+        gpkgs = project_imports()
+        self.styles.reset(gpkgs)
+        with self.styles.paused():
+            restyle_project_layers(gpkgs)
+        self.iface.messageBar().pushSuccess("AIXM Loader", "Remembered styles were reset.")
 
     def show_dialog(self):
         dlg = ImportDialog(self.iface.mainWindow(), default_output=default_target(project_imports()))
         if not dlg.exec():
             return
-        # layers of this GeoPackage are rebuilt: take them out of the project first
+        # layers of this GeoPackage are rebuilt: keep pending style changes, then take them out
+        self.styles.flush()
         group_name = remove_from_project(dlg.gpkg_path())
         task = AixmImportTask(dlg.paths(), dlg.gpkg_path(), dlg.effective(),
                               dlg.tables.isChecked(), self._task_done,
@@ -79,7 +109,8 @@ class AixmLoaderPlugin:
         for i in res.issues:
             log("[%s] %s %s (%s): %s" % (i.kind, i.feature_type or "", i.label or "", i.uuid or "", i.message),
                 "Info" if i.severity == "info" else "Warning")
-        added = add_to_project(res.gpkg_path, res.layers, group_name, include_tables=tables) if load else []
+        added = add_to_project(res.gpkg_path, res.layers, group_name, include_tables=tables,
+                               styles=self.styles) if load else []
         msg = "Imported %d features into %d layers from %d file(s) (AIXM %s)." % (
             res.layer_feature_count, len(res.layers), len(res.sources), ", ".join(res.versions) or "?")
         summary = res.issue_summary()

@@ -51,16 +51,16 @@ def component(op, seq, volume):
             ).format(o=op, s=seq, v=volume)
 
 
-def airspace(uuid, designator, *components):
-    return feature("Airspace", uuid, "<aixm:type>CTA</aixm:type><aixm:designator>%s</aixm:designator>%s"
-                   % (designator, "".join(components)))
+def airspace(uuid, designator, *components, type_="CTA"):
+    return feature("Airspace", uuid, "<aixm:type>%s</aixm:type><aixm:designator>%s</aixm:designator>%s"
+                   % (type_, designator, "".join(components)))
 
 
-def polygon_airspace(uuid, designator, ring, gml_id=None):
+def polygon_airspace(uuid, designator, ring, gml_id=None, type_="CTA"):
     """Airspace with one BASE component; ring is a closed list of (lon, lat)."""
     return airspace(uuid, designator, component(
         "BASE", 1, "<aixm:horizontalProjection>%s</aixm:horizontalProjection>"
-        % surface(gml_id or "s" + uuid[:8], [geodesic(ring)])))
+        % surface(gml_id or "s" + uuid[:8], [geodesic(ring)])), type_=type_)
 
 
 def contributor(uuid):
