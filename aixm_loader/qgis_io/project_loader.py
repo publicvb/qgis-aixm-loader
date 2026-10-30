@@ -145,6 +145,18 @@ def restyle_project_layers(gpkg_paths):
         layer.triggerRepaint()
 
 
+def issues_layer(gpkg_path):
+    """The project's issues table layer of gpkg_path, or None."""
+    from .importer import ISSUES_TABLE
+
+    target = os.path.normcase(os.path.abspath(gpkg_path))
+    for layer in QgsProject.instance().mapLayers().values():
+        if (layer.providerType() == "ogr" and _gpkg_of(layer) == target
+                and layer.source().endswith("layername=%s" % ISSUES_TABLE)):
+            return layer
+    return None
+
+
 def remove_from_project(gpkg_path):
     """Remove all layers read from gpkg_path; returns the name of their group (or None).
 

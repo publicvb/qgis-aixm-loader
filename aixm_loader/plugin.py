@@ -9,7 +9,7 @@ from .compat import QAction, qenum
 from .dialog import ImportDialog, default_target
 from .qgis_io.importer import ISSUES_TABLE
 from .qgis_io.project_loader import (
-    add_to_project, project_imports, remove_from_project, restyle_project_layers,
+    add_to_project, issues_layer, project_imports, remove_from_project, restyle_project_layers,
 )
 from .qgis_io.styles import StyleMemory
 from .qgis_io.task import AixmImportTask, log
@@ -118,16 +118,27 @@ class AixmLoaderPlugin:
             bar.pushSuccess("AIXM Loader", msg + " No geometry or alignment issues.")
             return
         msg += " Issues: " + ", ".join("%d %s" % (n, ISSUE_TEXT.get(k, k)) for k, n in summary.items())
-        self._push_issues(msg, next((l for l in added if l.name() == ISSUES_TABLE), None),
+        has_table = any(l.name() == ISSUES_TABLE for l in added)
+        self._push_issues(msg, res.gpkg_path if has_table else None,
                           any(i.severity == "error" for i in res.issues))
 
-    def _push_issues(self, msg, table_layer, has_errors):
-        """Message-bar warning with a button opening the issues table."""
+    def _push_issues(self, msg, gpkg_path, has_errors):
+        """Message-bar warning with a button opening the issues table of gpkg_path."""
         bar = self.iface.messageBar()
         item = bar.createMessage("AIXM Loader", msg)
-        if table_layer is not None:
+        if gpkg_path:
             button = QPushButton("Show issues")
-            button.clicked.connect(lambda: self.iface.showAttributeTable(table_layer))
+            button.clicked.connect(lambda: self._show_issues(gpkg_path))
             item.layout().addWidget(button)
         level = "Critical" if has_errors else "Warning"
         bar.pushWidget(item, qenum(Qgis, "MessageLevel", level), 0)
+
+    def _show_issues(self, gpkg_path):
+        # looked up on click: a later import into the same GeoPackage replaces its layers,
+        # so a layer kept from this import may already be deleted
+        layer = issues_layer(gpkg_path)
+        if layer is not None:
+            self.iface.showAttributeTable(layer)
+        else:
+            self.iface.messageBar().pushInfo("AIXM Loader", "The issues table of this import is no longer "
+                                                            "in the project.")

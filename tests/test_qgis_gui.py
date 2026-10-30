@@ -23,7 +23,7 @@ from aixm_loader.dialog import (  # noqa: E402
 )
 from aixm_loader.qgis_io.importer import run_import  # noqa: E402
 from aixm_loader.qgis_io.project_loader import (  # noqa: E402
-    add_to_project, delete_imports, project_imports, remove_from_project,
+    add_to_project, delete_imports, issues_layer, project_imports, remove_from_project,
 )
 from aixm_loader.qgis_io.task import AixmImportTask  # noqa: E402
 from tests import aixm_samples as S  # noqa: E402
@@ -210,6 +210,60 @@ class DeletePreviousImportsTests(unittest.TestCase):
         self.assertIsNone(QgsProject.instance().layerTreeRoot().findGroup("gone"))
         forget_imports(deleted)
         self.assertEqual(previous_imports(), [kept])
+
+
+class _Bar:
+    def __init__(self):
+        self.infos = []
+
+    def pushInfo(self, title, text):
+        self.infos.append(text)
+
+
+class _Iface:
+    def __init__(self):
+        self.bar = _Bar()
+        self.shown = []
+
+    def messageBar(self):
+        return self.bar
+
+    def showAttributeTable(self, layer):
+        self.shown.append(layer.source())
+
+
+class ShowIssuesTests(unittest.TestCase):
+    """Synthetic data: runs without the sample files."""
+
+    def tearDown(self):
+        QgsProject.instance().clear()
+
+    def test_button_of_an_earlier_import_opens_the_current_table(self):
+        # "Show issues" of a message from before a later Add into the same GeoPackage
+        # used to hit the deleted layer (RuntimeError: wrapped C/C++ object ... has been deleted)
+        from aixm_loader.plugin import AixmLoaderPlugin
+        open_ring = [(15.0, 50.0), (15.1, 50.0), (15.1, 50.1), (15.0, 50.1)]  # not closed: an issue
+        first = S.write(S.message(S.polygon_airspace("dddddddd-0000-0000-0000-00000000000a", "A", open_ring)))
+        second = S.write(S.message(S.polygon_airspace("dddddddd-0000-0000-0000-00000000000b", "B", open_ring)))
+        gpkg = os.path.join(tempfile.mkdtemp(), "issues.gpkg")
+        try:
+            add_to_project(gpkg, run_import([first], gpkg, check_neighbours=False).layers, "imp")
+            old = issues_layer(gpkg)
+            self.assertIsNotNone(old)
+            remove_from_project(gpkg)  # what the plugin does before adding the next file
+            add_to_project(gpkg, run_import([second], gpkg, check_neighbours=False, append=True).layers, "imp")
+        finally:
+            S.cleanup(first)
+            S.cleanup(second)
+        from qgis.PyQt import sip
+        self.assertTrue(sip.isdeleted(old))  # the layer the old button used to hold
+        iface = _Iface()
+        plugin = AixmLoaderPlugin(iface)
+        plugin._show_issues(gpkg)  # the earlier message's button
+        self.assertEqual(iface.shown, [issues_layer(gpkg).source()])
+        QgsProject.instance().clear()
+        plugin._show_issues(gpkg)
+        self.assertEqual(len(iface.bar.infos), 1)  # gone from the project: a note, no error
 
 
 if __name__ == "__main__":
