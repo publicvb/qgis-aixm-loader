@@ -17,6 +17,6 @@ license=GPL-2.0-or-later
 category=Vector
 tags=aixm,aeronautical,aviation,airspace,gml,eaip
 icon=icon.svg
-experimental=True
+experimental=False
 deprecated=False
 hasProcessingProvider=no
