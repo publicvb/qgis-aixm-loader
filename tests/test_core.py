@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+import zlib
 from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,6 +14,7 @@ from aixm_loader.core import geodesy  # noqa: E402
 from aixm_loader.core.dataset import AixmDataset, iter_geometries  # noqa: E402
 from aixm_loader.core.flatten import flatten  # noqa: E402
 from aixm_loader.core.model import Measure, Ref  # noqa: E402
+from aixm_loader.core.parser import AixmParser, _ProgressReader  # noqa: E402
 from aixm_loader.core.resolve import follow_curve  # noqa: E402
 from aixm_loader.core.xmlutil import parse_href  # noqa: E402
 
@@ -136,6 +138,31 @@ class SyntheticTests(unittest.TestCase):
                        "airport": Ref("uuid", "abc")}, label_lookup=lambda r: "LKPR")
         self.assertEqual(row, {"designator": "X", "upperLimit": 95, "upperLimit_uom": "FL",
                                "airport_uuid": "abc", "airport_label": "LKPR"})
+
+
+class UntrustedXmlTests(unittest.TestCase):
+    BOMB = (b'<?xml version="1.0"?>\n<!DOCTYPE m [<!ENTITY a "aaaaaaaaaa">'
+            b'<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]>\n<m>&b;</m>')
+
+    def test_document_with_dtd_is_refused(self):
+        fd, path = tempfile.mkstemp(suffix=".xml")
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(self.BOMB)
+        try:
+            with self.assertRaisesRegex(ValueError, "DTD"):
+                AixmParser().scan(path)
+        finally:
+            os.remove(path)
+
+    def test_marker_split_across_reads_is_found(self):
+        reader = _ProgressReader(io.BytesIO(b"x" * 10 + b"<!DOCTYPE m>"), 22, None)
+        reader.read(14)  # ends inside "<!DOCTYPE"
+        with self.assertRaises(ValueError):
+            reader.read()
+
+    def test_stored_feature_with_dtd_is_refused(self):
+        with self.assertRaises(ValueError):
+            AixmParser().parse_stored(zlib.compress(self.BOMB), "x")
 
 
 class GeodesyTests(unittest.TestCase):

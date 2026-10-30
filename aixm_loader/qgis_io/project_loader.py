@@ -29,7 +29,7 @@ ORDER = {"point": 0, "line": 1, "polygon": 2}
 
 
 def _hash_colour(value):
-    h = hashlib.md5(str(value).encode("utf-8")).digest()
+    h = hashlib.md5(str(value).encode("utf-8"), usedforsecurity=False).digest()  # a stable colour only
     return "%d,%d,%d" % (60 + h[0] % 160, 60 + h[1] % 160, 60 + h[2] % 160)
 
 

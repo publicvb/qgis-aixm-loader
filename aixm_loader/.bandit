@@ -1,0 +1,5 @@
+[bandit]
+# B405 / B314: xml.etree parses the user's AIXM files. Documents declaring a DTD or entities
+# are refused before parsing (core/parser.py, check_no_dtd), which rules out entity expansion
+# and external entity attacks; AIXM never uses a DTD.
+skips = B405,B314

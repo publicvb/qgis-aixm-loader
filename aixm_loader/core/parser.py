@@ -21,15 +21,31 @@ _TS_META = {"validTime", "interpretation", "sequenceNumber", "correctionNumber",
 _SKIP_GML = {"boundedBy", "identifier", "metaDataProperty", "description", "descriptionReference"}
 
 
+# AIXM never uses a DTD; refusing documents that declare one rules out entity
+# expansion attacks (billion laughs, external entities) in user-supplied files
+_DTD_MARKERS = (b"<!DOCTYPE", b"<!ENTITY")
+_MARKER_TAIL = max(len(m) for m in _DTD_MARKERS) - 1
+
+
+def check_no_dtd(data):
+    for marker in _DTD_MARKERS:
+        if marker in data:
+            raise ValueError("XML with a DTD or entity declarations (%s) is not accepted"
+                             % marker.decode("ascii"))
+
+
 class _ProgressReader:
-    """File wrapper that reports the fraction of bytes consumed."""
+    """File wrapper that reports the fraction of bytes consumed and refuses DTDs."""
 
     def __init__(self, fh, size, callback):
         self._fh, self._size, self._cb = fh, max(size, 1), callback
         self._pos = 0
+        self._tail = b""  # end of the previous chunk: a marker may straddle two reads
 
     def read(self, n=-1):
         data = self._fh.read(n)
+        check_no_dtd(self._tail + data)
+        self._tail = data[-_MARKER_TAIL:]
         self._pos += len(data)
         if self._cb:
             self._cb(self._pos / self._size)
@@ -97,7 +113,9 @@ class AixmParser:
 
     def parse_stored(self, blob, source):
         """Feature from XML stored by iter_features(keep_xml=True)."""
-        el = ET.fromstring(zlib.decompress(blob))
+        data = zlib.decompress(blob)
+        check_no_dtd(data)  # written by iter_features, but the GeoPackage may come from elsewhere
+        el = ET.fromstring(data)
         for e in el.iter():
             v = aixm_version(namespace(e.tag))
             if v:

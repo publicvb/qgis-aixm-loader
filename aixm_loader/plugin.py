@@ -118,7 +118,7 @@ class AixmLoaderPlugin:
             bar.pushSuccess("AIXM Loader", msg + " No geometry or alignment issues.")
             return
         msg += " Issues: " + ", ".join("%d %s" % (n, ISSUE_TEXT.get(k, k)) for k, n in summary.items())
-        has_table = any(l.name() == ISSUES_TABLE for l in added)
+        has_table = any(lyr.name() == ISSUES_TABLE for lyr in added)
         self._push_issues(msg, res.gpkg_path if has_table else None,
                           any(i.severity == "error" for i in res.issues))
 

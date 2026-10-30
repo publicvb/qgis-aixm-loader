@@ -67,9 +67,9 @@ def inspect(path):
     src = ds.GetLayerByName(SOURCE_TABLE)
     if src is not None:
         info.has_store = True
-        sql = ("SELECT source_file, feature_type, COUNT(*) AS n FROM %s GROUP BY source_file, feature_type"
-               % SOURCE_TABLE)
-        res = ds.ExecuteSQL(sql)
+        # literal table name (SOURCE_TABLE): no SQL is built from strings
+        res = ds.ExecuteSQL("SELECT source_file, feature_type, COUNT(*) AS n FROM aixm_source_features "
+                            "GROUP BY source_file, feature_type")
         for f in res:
             source, ftype, n = f.GetField(0), f.GetField(1), f.GetField(2)
             info.source_type_counts.setdefault(source, {})[ftype] = n

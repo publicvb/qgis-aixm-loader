@@ -95,11 +95,15 @@ def save_gpkg_style(path, table, qml):
     src = ds.GetLayerByName(table)
     geom_column = src.GetGeometryColumn() if src is not None else ""
     name = table.replace("'", "''")
-    # like QGIS: only one default style per table
-    ds.ExecuteSQL("UPDATE %s SET useAsDefault = 0 WHERE f_table_name = '%s'" % (STYLES_TABLE, name))
     lyr = ds.GetLayerByName(STYLES_TABLE)
-    lyr.SetAttributeFilter("f_table_name = '%s' AND styleName = '%s'" % (name, STYLE_NAME))
-    f = lyr.GetNextFeature()
+    # like QGIS: only one default style per table
+    lyr.SetAttributeFilter("f_table_name = '%s'" % name)
+    rows = list(lyr)
+    for row in rows:
+        if row.GetField("useAsDefault"):
+            row.SetField("useAsDefault", 0)
+            lyr.SetFeature(row)
+    f = next((row for row in rows if row.GetField("styleName") == STYLE_NAME), None)
     new = f is None
     if new:
         f = ogr.Feature(lyr.GetLayerDefn())
@@ -122,8 +126,11 @@ def delete_gpkg_styles(path):
         ds = ogr.Open(path, 1)
     except RuntimeError:
         return
-    if ds is not None and ds.GetLayerByName(STYLES_TABLE) is not None:
-        ds.ExecuteSQL("DELETE FROM %s WHERE styleName = '%s'" % (STYLES_TABLE, STYLE_NAME))
+    lyr = ds.GetLayerByName(STYLES_TABLE) if ds is not None else None
+    if lyr is not None:
+        lyr.SetAttributeFilter("styleName = '%s'" % STYLE_NAME)
+        for fid in [f.GetFID() for f in lyr]:
+            lyr.DeleteFeature(fid)
     ds = None
 
 
