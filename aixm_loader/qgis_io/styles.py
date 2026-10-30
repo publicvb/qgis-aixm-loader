@@ -17,6 +17,7 @@ Only symbology, labels, rendering and diagrams are remembered.
 """
 import os
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 from osgeo import ogr
 from qgis.core import (
@@ -30,7 +31,7 @@ from ..compat import qenum
 from . import store
 
 STYLE_NAME = "aixm_loader"
-STYLES_TABLE = "layer_styles"
+STYLES_TABLE = store.STYLES_TABLE
 
 
 def style_categories():
@@ -75,6 +76,44 @@ def gpkg_style(path, table):
         qml = f.GetField("styleQML") or qml
     ds = None
     return qml
+
+
+def save_gpkg_style(path, table, qml):
+    """Store ``qml`` as the default style of ``table`` in the GeoPackage's layer_styles.
+
+    Written through a separate OGR connection on purpose: QgsVectorLayer.saveStyleToDatabase
+    reopens the connection the project's layers read from for writing, after which all of
+    them fail ("sqlite3_step(): unable to open database file") and draw nothing.
+    """
+    store.ensure_styles_table(path)
+    try:
+        ds = ogr.Open(path, 1)
+    except RuntimeError:
+        return
+    if ds is None:
+        return
+    src = ds.GetLayerByName(table)
+    geom_column = src.GetGeometryColumn() if src is not None else ""
+    name = table.replace("'", "''")
+    # like QGIS: only one default style per table
+    ds.ExecuteSQL("UPDATE %s SET useAsDefault = 0 WHERE f_table_name = '%s'" % (STYLES_TABLE, name))
+    lyr = ds.GetLayerByName(STYLES_TABLE)
+    lyr.SetAttributeFilter("f_table_name = '%s' AND styleName = '%s'" % (name, STYLE_NAME))
+    f = lyr.GetNextFeature()
+    new = f is None
+    if new:
+        f = ogr.Feature(lyr.GetLayerDefn())
+    for field, value in (("f_table_catalog", ""), ("f_table_schema", ""), ("f_table_name", table),
+                         ("f_geometry_column", geom_column), ("styleName", STYLE_NAME),
+                         ("styleQML", qml), ("useAsDefault", 1),
+                         ("description", "Remembered by AIXM Loader"),
+                         ("update_time", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))):
+        f.SetField(field, value)
+    if new:
+        lyr.CreateFeature(f)
+    else:
+        lyr.SetFeature(f)
+    ds = None
 
 
 def delete_gpkg_styles(path):
@@ -149,9 +188,7 @@ class StyleMemory(QObject):
         os.makedirs(self.profile_dir, exist_ok=True)
         with open(self.profile_qml(table), "w", encoding="utf-8") as fh:
             fh.write(doc.toString())
-        # saveStyleToDatabaseV2 is the QGIS 4 name; 3.34 only has the original
-        save_db = getattr(layer, "saveStyleToDatabaseV2", None) or layer.saveStyleToDatabase
-        save_db(STYLE_NAME, "Remembered by AIXM Loader", True, "", style_categories())
+        save_gpkg_style(path, table, doc.toString())
 
     def reset(self, gpkg_paths=()):
         """Forget all remembered styles (profile files and the given GeoPackages)."""

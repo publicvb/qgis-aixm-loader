@@ -79,6 +79,45 @@ def inspect(path):
     return info
 
 
+STYLES_TABLE = "layer_styles"
+# the table exactly as QGIS creates it: (name, type, width, subtype, default)
+_STYLES_FIELDS = [
+    ("f_table_catalog", ogr.OFTString, 256, None, None),
+    ("f_table_schema", ogr.OFTString, 256, None, None),
+    ("f_table_name", ogr.OFTString, 256, None, None),
+    ("f_geometry_column", ogr.OFTString, 256, None, None),
+    ("styleName", ogr.OFTString, 30, None, None),
+    ("styleQML", ogr.OFTString, 0, None, None),
+    ("styleSLD", ogr.OFTString, 0, None, None),
+    ("useAsDefault", ogr.OFTInteger, 0, ogr.OFSTBoolean, None),
+    ("description", ogr.OFTString, 0, None, None),
+    ("owner", ogr.OFTString, 30, None, None),
+    ("ui", ogr.OFTString, 30, None, None),
+    ("update_time", ogr.OFTDateTime, 0, None, "CURRENT_TIMESTAMP"),
+]
+
+
+def ensure_styles_table(path):
+    """Create the layer_styles table (as QGIS would) if missing; True when it was created."""
+    try:
+        ds = ogr.Open(path, 1)
+    except RuntimeError:
+        return False
+    if ds is None or ds.GetLayerByName(STYLES_TABLE) is not None:
+        return False
+    lyr = ds.CreateLayer(STYLES_TABLE, None, ogr.wkbNone, ["FID=id"])
+    for name, ftype, width, subtype, default in _STYLES_FIELDS:
+        fd = ogr.FieldDefn(name, ftype)
+        fd.SetWidth(width)
+        if subtype is not None:
+            fd.SetSubType(subtype)
+        if default is not None:
+            fd.SetDefault(default)
+        lyr.CreateField(fd)
+    ds = None
+    return True
+
+
 def read_records(path, exclude_sources=()):
     """[(source, uuid, type, xml)] stored in an AIXM Loader GeoPackage."""
     ds = _open(path)

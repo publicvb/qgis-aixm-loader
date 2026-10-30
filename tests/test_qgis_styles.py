@@ -9,9 +9,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from qgis.core import (  # noqa: E402
-    QgsApplication, QgsCategorizedSymbolRenderer, QgsFillSymbol, QgsProject, QgsRendererCategory,
-    QgsSingleSymbolRenderer,
+    QgsApplication, QgsCategorizedSymbolRenderer, QgsFillSymbol, QgsMapRendererSequentialJob,
+    QgsMapSettings, QgsProject, QgsRendererCategory, QgsSingleSymbolRenderer, QgsVectorLayer,
 )
+from qgis.PyQt.QtCore import QSize  # noqa: E402
 
 _app = QgsApplication.instance()
 if _app is None:
@@ -65,6 +66,28 @@ class StyleMemoryTests(unittest.TestCase):
         self.assertEqual(self.styles.pending, set())
         self.assertEqual(os.listdir(self.profile), [])
         self.assertIsNone(gpkg_style(gpkg, "Airspace"))
+
+    def test_saving_keeps_open_layers_readable(self):
+        # QgsVectorLayer.saveStyleToDatabase broke every open layer of the GeoPackage once they had
+        # been drawn: hiding an airspace type in the legend made the whole layer vanish for good
+        gpkg, res = make_import(S.polygon_airspace(UA, "A", SQ_A), S.polygon_airspace(UB, "B", SQ_B))
+        layer = self.load(gpkg, res)
+        ms = QgsMapSettings()
+        ms.setLayers([layer])
+        ms.setExtent(layer.extent())
+        ms.setOutputSize(QSize(50, 50))
+        job = QgsMapRendererSequentialJob(ms)
+        job.start()
+        job.waitForFinished()
+        key = layer.renderer().legendSymbolItems()[0].ruleKey()
+        layer.renderer().checkLegendSymbolItem(key, False)  # what the legend checkbox does
+        layer.emitStyleChanged()
+        self.styles.flush()
+        self.assertIsNotNone(gpkg_style(gpkg, "Airspace"))
+        self.assertEqual(sum(1 for _ in layer.getFeatures()), 2)
+        fresh = QgsVectorLayer(layer.source(), "fresh", "ogr")
+        self.assertTrue(fresh.loadDefaultStyle()[1])  # QGIS itself finds the saved default style
+        self.assertFalse(fresh.renderer().categories()[0].renderState())
 
     def test_user_style_is_saved_in_profile_and_geopackage(self):
         gpkg, res = make_import(S.polygon_airspace(UA, "A", SQ_A))
