@@ -3,6 +3,8 @@
 Imports AIXM 5.1 / 5.1.1 / 5.2 XML into a GeoPackage and adds styled layers to QGIS
 (3.34 LTR and 4.x). See `project.md` for the project goal.
 
+![Czech national AIXM dataset (LKAA) imported with AIXM Loader: airspaces, aerodromes, navaids and routes](assets/project_image/project_image.png)
+
 ## Layout
 
 ```
