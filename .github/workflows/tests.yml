@@ -18,5 +18,10 @@ jobs:
       - uses: actions/checkout@v5
       - name: QGIS version
         run: python3 -c "from qgis.core import Qgis; print(Qgis.version())"
+      # os._exit skips interpreter teardown, which can segfault in headless QGIS after all tests pass
       - name: Run tests
-        run: python3 -m unittest discover -s tests -t . -v
+        run: >
+          python3 -c "import os, sys, unittest;
+          r = unittest.main(module=None, argv=['tests', 'discover', '-s', 'tests', '-t', '.', '-v'], exit=False).result;
+          sys.stdout.flush(); sys.stderr.flush();
+          os._exit(0 if r.wasSuccessful() else 1)"
