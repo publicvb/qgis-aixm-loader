@@ -14,7 +14,8 @@ from a shared vertex) are not reported. Distances are measured in an
 azimuthal equidistant projection (metres).
 """
 from qgis.core import (
-    QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsGeometry, QgsPointXY, QgsProject,
+    QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsGeometry, QgsPoint, QgsPointXY,
+    QgsProject,
 )
 
 # offsets below this (m) are within the rounding of published coordinates
@@ -81,7 +82,9 @@ class Shape:
         if self._engine is None:
             self._engine = QgsGeometry.createGeometryEngine(self.boundary.constGet())
             self._engine.prepareGeometry()
-        return self._engine.distance(QgsGeometry.fromPointXY(QgsPointXY(x, y)).constGet())
+        # pass a QgsPoint, not QgsGeometry(...).constGet(): the temporary QgsGeometry would be
+        # freed before the engine reads it (crashes / garbage distances on Linux)
+        return self._engine.distance(QgsPoint(x, y))
 
 
 def _within(x, y, box, pad):

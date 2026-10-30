@@ -15,7 +15,7 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: QGIS version
         run: python3 -c "from qgis.core import Qgis; print(Qgis.version())"
       - name: Run tests
