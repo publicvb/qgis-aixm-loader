@@ -7,13 +7,14 @@ from qgis.gui import QgsFileWidget
 from qgis.PyQt.QtCore import QDateTime, QSettings, Qt
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QDateTimeEdit, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame,
-    QGroupBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QRadioButton,
-    QScrollArea, QVBoxLayout, QWidget,
+    QGroupBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
+    QRadioButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from .compat import qenum
 from .core.parser import AixmParser
 from .qgis_io import store
+from .qgis_io.project_loader import delete_imports, project_imports
 
 SETTINGS = "aixm_loader/"
 
@@ -30,6 +31,43 @@ def default_target(project_imports):
     if last and store.inspect(last).appendable:
         return last
     return None
+
+
+def _key(path):
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _stored_imports():
+    value = QSettings().value(SETTINGS + "imports", [])
+    if isinstance(value, str):  # QSettings returns a single-item list as a string
+        value = [value]
+    return [p for p in (value or []) if p]
+
+
+def remember_import(path):
+    """Record a GeoPackage this plugin writes to (offered later by "Delete previous imports")."""
+    paths = _stored_imports()
+    if _key(path) not in {_key(p) for p in paths}:
+        QSettings().setValue(SETTINGS + "imports", paths + [path])
+
+
+def forget_imports(gone):
+    gone = {_key(p) for p in gone}
+    QSettings().setValue(SETTINGS + "imports", [p for p in _stored_imports() if _key(p) not in gone])
+
+
+def previous_imports(extra=()):
+    """Existing AIXM Loader GeoPackages made by this plugin: recorded ones, the last used one
+    and ``extra`` (e.g. those loaded in the project, also covering imports made before
+    imports were recorded)."""
+    out, seen = [], set()
+    for p in _stored_imports() + [QSettings().value(SETTINGS + "last_gpkg", "")] + list(extra):
+        if p and _key(p) not in seen and os.path.isfile(p) and store.inspect(p).is_aixm:
+            seen.add(_key(p))
+            out.append(p)
+    return out
+
+
 CHECKED = qenum(Qt, "CheckState", "Checked")
 UNCHECKED = qenum(Qt, "CheckState", "Unchecked")
 USER_ROLE = qenum(Qt, "ItemDataRole", "UserRole")
@@ -56,6 +94,44 @@ class ScanTask(QgsTask):
 
     def finished(self, ok):
         self.on_done(self, ok)
+
+
+class DeleteImportsDialog(QDialog):
+    """Checklist of previous imports to move to the recycle bin."""
+
+    def __init__(self, paths, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Delete previous imports")
+        self.resize(700, 360)
+        text = QLabel("These GeoPackages were created by AIXM Loader. The checked ones are moved to the "
+                      "recycle bin and their layers removed from the project.")
+        text.setWordWrap(True)
+        self.files = QListWidget()
+        for p in paths:
+            size = os.path.getsize(p) / 1048576.0
+            item = QListWidgetItem("%s  (%.1f MB)  –  %s" % (os.path.basename(p), size, os.path.dirname(p)))
+            item.setData(USER_ROLE, p)
+            item.setToolTip(p)
+            item.setFlags(item.flags() | qenum(Qt, "ItemFlag", "ItemIsUserCheckable"))
+            item.setCheckState(CHECKED)
+            self.files.addItem(item)
+        self.files.itemChanged.connect(self._validate)
+        buttons = QDialogButtonBox(qenum(QDialogButtonBox, "StandardButton", "Cancel"))
+        self.delete_button = buttons.addButton("Move to recycle bin",
+                                               qenum(QDialogButtonBox, "ButtonRole", "AcceptRole"))
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addWidget(text)
+        lay.addWidget(self.files, 1)
+        lay.addWidget(buttons)
+
+    def selected(self):
+        items = [self.files.item(i) for i in range(self.files.count())]
+        return [it.data(USER_ROLE) for it in items if it.checkState() == CHECKED]
+
+    def _validate(self):
+        self.delete_button.setEnabled(bool(self.selected()))
 
 
 class ImportDialog(QDialog):
@@ -103,10 +179,17 @@ class ImportDialog(QDialog):
         for w in (self.existing, self.add_mode, self.replace_mode):
             mode_box.addWidget(w)
 
+        self.cleanup_button = QPushButton("Delete previous imports…")
+        self.cleanup_button.setToolTip("Move GeoPackages created by earlier imports to the recycle bin.")
+        self.cleanup_button.clicked.connect(self._delete_previous)
+        output_row = QHBoxLayout()
+        output_row.addWidget(self.output, 1)
+        output_row.addWidget(self.cleanup_button)
+
         form = QFormLayout()
         form.addRow("AIXM files", self.inputs)
         form.addRow("", files_hint)
-        form.addRow("Output GeoPackage", self.output)
+        form.addRow("Output GeoPackage", output_row)
         form.addRow("", mode_box)
 
         # feature classes
@@ -392,7 +475,28 @@ class ImportDialog(QDialog):
         s.setValue(SETTINGS + "tolerance", self.tolerance.value())
         s.setValue(SETTINGS + "neighbours", self.neighbours.isChecked())
         s.setValue(SETTINGS + "last_gpkg", self.gpkg_path())
+        remember_import(self.gpkg_path())
         self.accept()
+
+    # -- deleting previous imports --------------------------------------------
+    def _delete_previous(self):
+        candidates = previous_imports(project_imports())
+        if not candidates:
+            QMessageBox.information(self, "Delete previous imports", "No previous imports were found.")
+            return
+        dlg = DeleteImportsDialog(candidates, self)
+        if not dlg.exec():
+            return
+        deleted, failed = delete_imports(dlg.selected())
+        forget_imports(deleted)
+        out = self.gpkg_path()
+        if out and _key(out) in {_key(p) for p in deleted}:
+            self.output.setFilePath("")  # a new output is proposed next to the input files
+            self._inputs_changed()
+        self._output_changed()
+        if failed:
+            QMessageBox.warning(self, "Delete previous imports", "Not deleted:\n\n" + "\n".join(
+                "%s: %s" % (p, reason) for p, reason in failed))
 
     def reject(self):
         if self._scan_task is not None:

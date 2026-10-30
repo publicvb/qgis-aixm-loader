@@ -8,6 +8,7 @@ from qgis.core import (
     QgsPalLayerSettings, QgsProject, QgsRendererCategory, QgsTextFormat, QgsVectorLayer,
     QgsVectorLayerSimpleLabeling,
 )
+from qgis.PyQt.QtCore import QFile
 from qgis.PyQt.QtGui import QColor
 
 AIRSPACE_COLOURS = {
@@ -170,6 +171,40 @@ def remove_from_project(gpkg_path):
     if group is not None and _prune(group):
         root.removeChildNode(group)
     return group_name or os.path.splitext(os.path.basename(gpkg_path))[0]
+
+
+def delete_imports(gpkg_paths, trash=True):
+    """Remove the layers of these AIXM Loader GeoPackages from the project and delete the files.
+
+    Files go to the recycle bin unless ``trash`` is False. A file not created by
+    AIXM Loader is never touched. Returns (deleted paths, [(path, reason)] not deleted).
+    """
+    from . import store
+
+    deleted, failed = [], []
+    for path in gpkg_paths:
+        if not store.inspect(path).is_aixm:
+            failed.append((path, "not an AIXM Loader GeoPackage"))
+            continue
+        remove_from_project(path)
+        try:
+            for f in [path] + [path + s for s in ("-wal", "-shm") if os.path.exists(path + s)]:
+                _delete_file(f, trash)
+        except OSError as e:
+            failed.append((path, str(e)))
+        else:
+            deleted.append(path)
+    return deleted, failed
+
+
+def _delete_file(path, trash):
+    if not trash:
+        os.remove(path)
+        return
+    res = QFile.moveToTrash(path)  # PyQt returns (ok, path in trash)
+    if not (res[0] if isinstance(res, tuple) else res):
+        # never fall back to deleting permanently; usually the file is still open somewhere
+        raise OSError("cannot be moved to the recycle bin (still open in another program?)")
 
 
 def _prune(group):

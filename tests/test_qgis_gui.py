@@ -15,12 +15,18 @@ if _app is None:
     _app = QgsApplication([], True)
     _app.initQgis()
 
-from aixm_loader.dialog import CHECKED, UNCHECKED, USER_ROLE, ImportDialog, default_target  # noqa: E402
+from qgis.PyQt.QtCore import QSettings  # noqa: E402
+
+from aixm_loader.dialog import (  # noqa: E402
+    CHECKED, UNCHECKED, USER_ROLE, ImportDialog, default_target, forget_imports, previous_imports,
+    remember_import,
+)
 from aixm_loader.qgis_io.importer import run_import  # noqa: E402
 from aixm_loader.qgis_io.project_loader import (  # noqa: E402
-    add_to_project, project_imports, remove_from_project,
+    add_to_project, delete_imports, project_imports, remove_from_project,
 )
 from aixm_loader.qgis_io.task import AixmImportTask  # noqa: E402
+from tests import aixm_samples as S  # noqa: E402
 
 SAMPLES = os.path.join(ROOT, "assets", "sample_xml_files")
 LKAA = os.path.join(SAMPLES, "LKAA_FULL_20230713.xml")
@@ -145,6 +151,65 @@ class TaskAndProjectTests(unittest.TestCase):
         self.assertEqual(project.mapLayersByName("aixm_issues_points"), [])  # borders resolved now
         airspace = project.mapLayersByName("Airspace")[0]
         self.assertEqual(sum(1 for f in airspace.getFeatures() if f["geom_complete"] != 1), 0)
+
+
+class DeletePreviousImportsTests(unittest.TestCase):
+    """Synthetic data: runs without the sample files."""
+
+    KEYS = ("aixm_loader/imports", "aixm_loader/last_gpkg")
+
+    def setUp(self):
+        s = QSettings()
+        self._saved = {k: s.value(k) for k in self.KEYS}
+        for k in self.KEYS:
+            s.remove(k)
+        self.dir = tempfile.mkdtemp()
+        self.xml = S.write(S.message(S.polygon_airspace("cccccccc-0000-0000-0000-00000000000a", "A",
+                                                        [(15.0, 50.0), (15.1, 50.0), (15.1, 50.1),
+                                                         (15.0, 50.0)])))
+
+    def tearDown(self):
+        QgsProject.instance().clear()
+        S.cleanup(self.xml)
+        s = QSettings()
+        for k, v in self._saved.items():
+            if v is None:
+                s.remove(k)
+            else:
+                s.setValue(k, v)
+
+    def gpkg(self, name):
+        path = os.path.join(self.dir, name)
+        run_import([self.xml], path, check_neighbours=False)
+        return path
+
+    def test_only_own_existing_imports_are_offered(self):
+        first, second = self.gpkg("first.gpkg"), self.gpkg("second.gpkg")
+        from osgeo import ogr
+        foreign = os.path.join(self.dir, "foreign.gpkg")
+        ogr.GetDriverByName("GPKG").CreateDataSource(foreign).CreateLayer("mine", None, ogr.wkbNone)
+        for p in (first, foreign, os.path.join(self.dir, "gone.gpkg"), first):
+            remember_import(p)
+        loaded = self.gpkg("loaded.gpkg")  # imported before imports were recorded, open in the project
+        add_to_project(loaded, run_import([self.xml], loaded, check_neighbours=False).layers, "loaded")
+        QSettings().setValue("aixm_loader/last_gpkg", second)
+        self.assertEqual(previous_imports(project_imports()), [first, second, loaded])
+
+    def test_delete_removes_layers_and_files(self):
+        kept, gone = self.gpkg("kept.gpkg"), self.gpkg("gone.gpkg")
+        remember_import(kept)
+        remember_import(gone)
+        add_to_project(gone, run_import([self.xml], gone, check_neighbours=False).layers, "gone")
+        self.assertTrue(QgsProject.instance().mapLayers())
+        deleted, failed = delete_imports([gone, self.xml], trash=False)
+        self.assertEqual(deleted, [gone])
+        self.assertEqual([p for p, _ in failed], [self.xml])  # not a GeoPackage of ours: untouched
+        self.assertTrue(os.path.isfile(self.xml))
+        self.assertFalse(os.path.exists(gone))
+        self.assertEqual(QgsProject.instance().mapLayers(), {})
+        self.assertIsNone(QgsProject.instance().layerTreeRoot().findGroup("gone"))
+        forget_imports(deleted)
+        self.assertEqual(previous_imports(), [kept])
 
 
 if __name__ == "__main__":

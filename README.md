@@ -59,6 +59,11 @@ route segment end points, contributor airspaces). Layers of the GeoPackage that 
 the project are removed before the import and re-added afterwards in the same group.
 A GeoPackage not created by AIXM Loader is never modified.
 
+**Delete previous imports…** (next to the output field) lists the GeoPackages AIXM Loader
+created – the recorded imports, the last used one and those loaded in the project – and moves
+the checked ones to the recycle bin after removing their layers from the project. Files not
+created by AIXM Loader are never offered or deleted.
+
 ## Remembered styles
 
 When you restyle a layer of an import (symbology, labels, opacity / scale visibility, diagrams),
